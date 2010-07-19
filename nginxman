@@ -1,0 +1,52 @@
+#!/usr/bin/env ruby
+
+def getpid(pidfile)
+    f = File.open(pidfile)
+    pid = f.read().strip().to_i
+    if pid == 0
+        raise "Error reading pid file: %s" % pidfile
+    end
+    return pid
+end
+
+pidfile = ARGV.first || "/var/run/nginx.pid"
+pidfile2 = "%s.oldbin" % pidfile
+
+if not pidfile && File.exist?(pidfile)
+    warn "Invalid pid file: %s\nIs nginx running?" % pidfile
+end
+
+puts "Starting new nginx binary"
+Process.kill("USR2", getpid(pidfile))
+
+puts "Sleeping 2 seconds"
+sleep(2)
+
+puts "Gracefully stopping old workers"
+Process.kill("WINCH", getpid(pidfile2))
+
+puts ""
+puts "Now we have the new and the old nginx masters, but only the new workers. If everything looks good we will shut down the old master, otherwise we can start the old workers again and stop the new master"
+
+while true:
+    puts "Enter new to continue with new binary, old to roll back: "
+    plan = gets.downcase
+    break if ['new', 'old'].include?(plan)
+    puts "Invalid input: %s" % plan
+end
+
+if plan == 'new':
+    puts "Stopping old master"
+    Process.kill("QUIT", getpid(pidfile2))
+else
+    puts "Starting old workers without config reload"
+    Process.kill("HUP", getpid(pidfile2))
+    puts "Gracefully shutting down new workers"
+    Process.kill("QUIT", getpid(pidfile))
+    puts "Sleeping 3 seconds"
+    sleep(3)
+    puts("Stopping new master")
+    Process.kill("QUIT", getpid(pidfile))
+
+puts "All done. Check that only one nginx master is running."
+
